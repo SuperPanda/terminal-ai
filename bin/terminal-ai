@@ -2,9 +2,19 @@
 # File: ./terminal-ai
 # Description: Script to Communicate and Log with AI.
 # Usage: ./terminal-ai [--output-dir=<OUTPUT_DIRECTORY_PATH>] [--output-file=<OUTPUT_FILE>] [--dry-run] [--help] [--verbose] <MSG_TO_SEND_TO_AI>
-
-# TAI_MODEL="gpt-5-nano" ./terminal-ai -- rewrite these bash comments so its number
-# current task DISABLE -o "NO_[USER|AI]_[STDOUT|FILE]
+# VIM: 
+#   :w !cat terminal-ai | xargs -0 terminal-ai --model="gpt-5-nano" ./terminal-ai -- "some message"
+# Logs extractable with '^\[[^\]]+\]'
+#
+# 
+# if wanting to write to a file instead of using the --input-file= 
+# optional '-o [<OPTION>[,<OPTION>*]' where i can skip the speaker, the response, 
+# the output to log, output to stdout, the metadata in log, the metadata in stdout.
+#
+# options need to be extendable so chunking or partial operations work with cache processing
+# or state operations, but like composable and sort. 
+#
+# DISABLE -o "NO_[USER|AI]_[STDOUT|FILE]
 # 1. Enable controlling output to stdout and to logs 
 #    partially managed with the whitespace property, sed -n '1,350{/^[^\ ]/d;s/^ //;p}' 2025-09-02.md 
 # 3. Use the outputdir as the base for context directories and ensure the output is generated there,
@@ -13,10 +23,16 @@
 #    but not dispatch, so that the same request can be to sent to multiple agents.
 # 5. Route to the new response API
 # 6. Support deep seek
+#
+# The context directories work like
+# terminal-ai  --input-file=SOME_CONTEXT.CTX.d/SOME_PROMPT_CONCATENATED_WITH_CONTEXT.md --output-dir=SOME_CONTEXT.d --output-file=RESPONSE.md --
+# if you want to overwrite file... use terminal-ai -o '....' .... > FILE.md
+#
+#
 
 
 
-DEFAULT_APP_NAME="tai-dev" # terminal-ai for prefix, as tai is for plugins.
+DEFAULT_APP_NAME="terminal-ai" # terminal-ai for prefix, as tai is for plugins.
 APP_NAME="${TAI_APP_NAME:-$DEFAULT_APP_NAME}"
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -25,8 +41,7 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_CONFIG_DIR="${TAI_CONFIG_DIR:-$XDG_CONFIG_HOME/$APP_NAME}"
 APP_DATA_DIR="${TAI_DATA_DIR:-$XDG_DATA_HOME/$APP_NAME}"
 #
-#LOG_STORAGE_PATH="/root/artifacts/logs/terminal-ai/transcripts"
-LOG_STORAGE_PATH="$APP_DATA_DIR/transcripts"
+LOG_STORAGE_PATH="$APP_DATA_DIR/transcripts/default"
 LOG_FILE="`date --rfc-3339=date`.md"
 
 # Default values for optional arguments
@@ -228,8 +243,7 @@ AISpeak() {
   if [ "$DRY_RUN" -eq 1 ]; then
     ai_speech="<AI Response>"
   else
-    # MAYBE MOVE THIS TO PRINT 
-    #    MODEL="gpt-5" # GOOD FOR BLAH - ...
+    #    MODEL="gpt-5" # good for blah...
     #    INCLUDE THE SUMMARY
     # https://platform.openai.com/settings/organization/data-controls/sharing to see price
     # HIGH LIMIT FREE TIER [DAILY TOKEN LIMIT DEFAULT = 10million]
@@ -301,6 +315,7 @@ AISpeak() {
         ')
     # NEED ONE FOR DEEPSEEK.   
     # CHANGE TO RESPONSE
+    # response=$(curl -s https://api.openai.com/v1/response \
     response=$(curl -s https://api.openai.com/v1/chat/completions \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $OPENAI_API_KEY" \
