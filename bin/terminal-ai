@@ -1,50 +1,33 @@
-#!/bin/sh
+#!/usr/bin/env sh
 # File: ./terminal-ai
 # Description: Script to Communicate and Log with AI.
 # Usage: ./terminal-ai [--output-dir=<OUTPUT_DIRECTORY_PATH>] [--output-file=<OUTPUT_FILE>] [--dry-run] [--help] [--verbose] <MSG_TO_SEND_TO_AI>
 
-DEFAULT_APP_NAME="tai-dev"
+# TAI_MODEL="gpt-5-nano" ./terminal-ai -- rewrite these bash comments so its number
+# current task DISABLE -o "NO_[USER|AI]_[STDOUT|FILE]
+# 1. Enable controlling output to stdout and to logs 
+#    partially managed with the whitespace property, sed -n '1,350{/^[^\ ]/d;s/^ //;p}' 2025-09-02.md 
+# 3. Use the outputdir as the base for context directories and ensure the output is generated there,
+#    infact the idea to have multi stream integration is outside the scope of this. 
+# 4. Allow a message id to be used as the parent via --parent-id (and a way to basically add the request,
+#    but not dispatch, so that the same request can be to sent to multiple agents.
+# 5. Route to the new response API
+# 6. Support deep seek
 
-# Config (defaults to $HOME/.config; analogous to /etc)
+
+
+DEFAULT_APP_NAME="tai-dev" # terminal-ai for prefix, as tai is for plugins.
+APP_NAME="${TAI_APP_NAME:-$DEFAULT_APP_NAME}"
+
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-
-# Cache (defaults to $HOME/.cache; analogous to /var/cache)
-# XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"  # Uncomment to explicitly set if above is commented.
-
-# Data (defaults to $HOME/.local/share; analogous to /usr/share)
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
-# State (defaults to $HOME/.local/state; analogous to /var/lib)
-XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
-
-# Runtime (no default required by spec; see handling below)
-# XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"  # Leave unset to allow system (e.g., pam_systemd) to provide /run/user/$UID.
-
-#   APP_NAME=terminal-ai
-#   APP_CONFIG_DIR="$XDG_CONFIG_HOME/$APP_NAME"
-#   APP_CACHE_DIR="$XDG_CACHE_HOME/$APP_NAME"
-#   APP_DATA_DIR="$XDG_DATA_HOME/$APP_NAME"
-#   APP_STATE_DIR="$XDG_STATE_HOME/$APP_NAME"
-#   APP_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}/$APP_NAME"  # only if XDG_RUNTIME_DIR is available
-# ensure_dir "$APP_CONFIG_DIR" "$APP_CACHE_DIR" "$APP_DATA_DIR" "$APP_STATE_DIR"
-# [ -n "${XDG_RUNTIME_DIR:-}" ] && ensure_dir "$APP_RUNTIME_DIR" || :
-
----
-
-# --- 
-
-APP_NAME="${TAI_APP_NAME:-$DEFAULT_APP_NAME}"
-APP_CONFIG_PATH="${TAI_CONFIG_PATH:-$XDG_CONFIG_HOME}/$APP_NAME"
-
-# MAKE THE FOLLOWING BE XDG_COMPLIANT
-
-echo "$APP_CONFIG_PATH"
-
-
-LOG_STORAGE_PATH="$HOME/repos/terminal-ai-transcripts/default"
+APP_CONFIG_DIR="${TAI_CONFIG_DIR:-$XDG_CONFIG_HOME/$APP_NAME}"
+APP_DATA_DIR="${TAI_DATA_DIR:-$XDG_DATA_HOME/$APP_NAME}"
+#
+#LOG_STORAGE_PATH="/root/artifacts/logs/terminal-ai/transcripts"
+LOG_STORAGE_PATH="$APP_DATA_DIR/transcripts"
 LOG_FILE="`date --rfc-3339=date`.md"
-mkdir -p "$LOG_STORAGE_PATH"
-touch "$LOG_STORAGE_PATH/$LOG_FILE"
 
 # Default values for optional arguments
 DRY_RUN=0
@@ -63,6 +46,7 @@ show_help() {
   echo "  --output-file=<OUTPUT_FILE>            Specifies the name of the log file. Defaults to the current date in RFC-3339 format."
   echo "  --input-file=<INPUT_FILE>             Specify a file to attach."
   echo "  --env-file=<OPENAI_ENV_FILE>           If set, specifies the file path to source environment variables for OpenAI."
+  echo "  --model=<MODEL>                        If set will use the model (overrides TAI_MODEL)"
   echo "  --dry-run                              If set, the script will not actually send the message to AI, but will log a placeholder response."
   echo "  --help                                 Show this help message and exit."
   echo "  --verbose                              If set, the entire response from AI will be outputted."
@@ -76,7 +60,11 @@ while [[ "$1" == --* ]]; do
       shift
       ;;
     --output-dir=*)
-      output_dir="${1#*=}"
+      OUTPUT_DIR="${1#*=}"
+      shift
+      ;;
+    --model=*)
+      TAI_MODEL="${1#*=}"
       shift
       ;;
     --output-file=*)
@@ -111,6 +99,18 @@ while [[ "$1" == --* ]]; do
   esac
 done
 
+# if output-dir set manually 
+if [ "$LOG_STORAGE_PATH" != "$OUTPUT_DIR" ]; then
+  # DO NOT CREAT IF PROVIDED PATH IS NOT A DIRECTORY 
+  # AS IT MIGHT BE WRONG.
+  if [ ! -d "$OUTPUT_DIR" ]; then
+    echo "PROVIDED OUTPUT PATH IS NOT A VALID DIRECTORY: $OUTPUT_DIR" >&2; exit 1; 
+  fi
+fi
+
+mkdir -p "$LOG_STORAGE_PATH"
+touch "$LOG_STORAGE_PATH/$LOG_FILE"
+
 SUPPLIED_PROMPT="$*"
 
 if [ -z "$SUPPLIED_PROMPT" ]; then
@@ -134,20 +134,46 @@ fi
 Converse() {
   local supplied_prompt="$1"
   local attachment="$2"  
+  
+  HASH8() {
+    local in="$1"
+    echo "${in:-"NULL"}" | sha256sum | cut -c1-8
+  }
+
+  GenMessageId() {
+    local speaker="$1"
+    local timestamp="${2:-$(date --rfc-3339=seconds)}"
+    local parent_message_id="${3:-$(HASH8 "NULL")}"
+    local speech_id="$(HASH8 "$(printf "%s,%s" "$timestamp" "$speaker")")"
+    local parent_speech_id="$(printf "%s" "$parent_message_id" | cut -c1-8)" # THIS SHOULD BE LIKE THE HASH OF "NULL" or the speech part of the messge id
+    local message_id="$(printf "%s-%s" "$speech_id" "$parent_speech_id")"
+    echo "$message_id"
+  }
+
   if [ -z "$attachment" ]; then
     user_speech=$(Speak "USER" "$supplied_prompt")
   else
     user_speech=$(Speak "USER" "${supplied_prompt}\n--- (@attachment) ---\n${attachment}")
   fi
-  Record "USER" "$user_speech"
 
-  ai_speech=$(Speak "AI" "$user_speech")
-  Record "AI" "$ai_speech"
+  _USER_TS="$(date --rfc-3339=seconds)"
+  _USER_MSG_ID="$(GenMessageId "USER" "$_USER_TS")"
+
+  Record "USER" "$user_speech" "$_USER_TS" "$_USER_MSG_ID"
+
+  _AI_TS="$(date --rfc-3339=seconds)"
+  _AI_MSG_ID="$(GenMessageId "AI" "$_AI_TS" "$_USER_MSG_ID")"
+
+  ai_speech="$(Speak "AI" "$user_speech")"
+  Record "AI" "$ai_speech" "$_AI_TS" "$_AI_MSG_ID"
 }
 
 Speak() {
   local speaker="$1"
   local prompt="$2"
+  local parent_id="$3"
+
+  # NEED TO ADD METADATA HERE FOR MessageID, MessageID, and Model
   if [ "$speaker" == "USER" ]; then
     UserSpeak "$prompt"
   elif [ "$speaker" == "AI" ]; then
@@ -156,21 +182,38 @@ Speak() {
 }
 
 Record() {
+  # LIFTED TIMESTAMP TO SPEAK
   local speaker="$1"
   local speech="$2"
-  local speech_metadata="[`date --rfc-3339=seconds`, $speaker]" 
+  local speech_ts="$3"
+  local message_id="$4"
+  local speech_metadata="$(printf "[%s, %s, %s]" "$speech_ts" "$speaker" "$message_id")"
   # SPEECH METADATA NEEDS TO BE CONSISTENT WHEN CALLED FROM AI OR USER.
-  echo 
-  echo "$speech_metadata"
-  echo -e "$speech"
-  echo 
-  echo "---"
+  
+  # THIS WILL BE WHERE TAI_OPT_
+  # echo "$speech_metadata"
+  indent() {
+     printf '%s\n' "$1" | sed 's/^/ /'
+  }
+  
+  # speech="asd
+  # asd
+  # asd"
+  # speech_metadata="<!-- hi -->"
+  
+  playback() {
+   _metadata="${1:-$speech_metadata}"
+   _speech="${2:-$speech}"
+   printf '%s\n%s\n\n---\n' "$_metadata" "$_speech"
+  }
+  playback 
 
-  echo >> "$OUTPUT_DIR/$OUTPUT_FILE"
-  echo "$speech_metadata" >> "$OUTPUT_DIR/$OUTPUT_FILE"
-  echo -e "$speech" >> "$OUTPUT_DIR/$OUTPUT_FILE"
-  echo >> "$OUTPUT_DIR/$OUTPUT_FILE"
-  echo "---" >> "$OUTPUT_DIR/$OUTPUT_FILE"
+
+  ispeech=$(indent "$speech")
+  # playback "$speech_metadata" "$ispeech" >> /tmp/out
+  # cat /tmp/out
+  playback "$speech_metadata" "$ispeech" >> "$OUTPUT_DIR/$OUTPUT_FILE"
+
 }
 
 UserSpeak() {
@@ -185,10 +228,11 @@ AISpeak() {
   if [ "$DRY_RUN" -eq 1 ]; then
     ai_speech="<AI Response>"
   else
-    # TOKEN BUCKET `OPENAI-10MILLION-FREE`
+    # MAYBE MOVE THIS TO PRINT 
+    #    MODEL="gpt-5" # GOOD FOR BLAH - ...
+    #    INCLUDE THE SUMMARY
     # https://platform.openai.com/settings/organization/data-controls/sharing to see price
-    # LIMIT: 10 million tokens per day
-    # MODELS:
+    # HIGH LIMIT FREE TIER [DAILY TOKEN LIMIT DEFAULT = 10million]
     # - gpt-5-mini
     # - gpt-5-nano
     # - gpt-4.1-mini
@@ -198,11 +242,10 @@ AISpeak() {
     # - o3-mini
     # - o4-mini
     # - codex-mini-latest
-    #
-    # TOKEN BUCKET `OPENAI-1MILLION-FREE` (--think-harder)
-    # LIMIT: 1 million tokens per day
+    # 
+    # LOW LIMIT FREE TIER
     # MODELS:
-    #   - gpt-5*
+    #   - gpt-5
     #   - gpt-5-chat-latest
     #   - gpt-4.1
     #   - gpt-4o
@@ -218,27 +261,26 @@ AISpeak() {
     # todo: reasoning support
     # todo: decide command params and implementation
     #       for ...
-
     DEFAULT_MODEL="gpt-5-mini" # default
     DEFAULT_THINK_HARDER_MODEL="o3" # --think=harder,different
     DEFAULT_TINY_MODEL="gpt-5-nano"
     ALTERNATE_MODEL="o4-mini" # --think-different -t harder -t different 
     ALTERNATE_THINK_HARDER_MODEL="gpt-5" # --think=harder  OR maybe named differently
     ALTERNATE_TINY_MODEL="gpt-4.1-nano"
-    
+   
     # ~~ normal ~~ 
     # MODEL="$DEFAULT_MODEL" 
     # MODEL="$ALTERNATE_MODEL"
     # ~~ harder ~~
-    # MODEL="$DEFAULT_THINK_HARDER_MODEL"
-    MODEL="$ALTERNATE_THINK_HARDER_MODEL"
+    MODEL="$DEFAULT_THINK_HARDER_MODEL"
+    # MODEL="$ALTERNATE_THINK_HARDER_MODEL"
     # ~~ tiny ~~
     # MODEL="$DEFAULT_TINY_MODEL"
     # MODEL="$ALTERNATE_TINY_MODEL"
     INSTRUCTION="You are a Terminal Based Assistant, which provides Responses Compliant to CommonMark Spec (unless otherwise specified)."
     # NEED TO BE ABLE TO SUPPORT RESPONSE API 
     request_body=$(jq -n \
-      --arg model "$MODEL" \
+      --arg model "${TAI_MODEL:-$MODEL}" \
       --arg system "system" \
       --arg user "user" \
       --arg instruction "$INSTRUCTION" \
@@ -258,6 +300,7 @@ AISpeak() {
           }
         ')
     # NEED ONE FOR DEEPSEEK.   
+    # CHANGE TO RESPONSE
     response=$(curl -s https://api.openai.com/v1/chat/completions \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $OPENAI_API_KEY" \
