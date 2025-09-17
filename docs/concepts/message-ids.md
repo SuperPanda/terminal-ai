@@ -71,15 +71,18 @@ For streaming scenarios where a speech act is delivered in chunks:
 - **Consistent Audience Identity**: All chunks respond to the same parent message
 - **Efficient Retrieval**: Chunks can be grouped by Message ID for reconstruction
 
-## 6. Refinements and Notes
+## 6. Notes
 
-- **TIMESTAMP**: Must be precise enough (e.g., microseconds) to ensure uniqueness
-- **SPEAKER**: Identifies the resource or agent, enabling multi-entity responses
+- **TIMESTAMP**: Timestamp is not required for uniqueness, as the speech is what ever is represented by the hash(timestamp,speaker)+[parent-message-id/2]  Must be precise enough (e.g., microseconds) to ensure uniqueness
+- **SPEAKER**: Identifies the resource or agent, enabling multi-entity responses. For now it is SPEAKER and AI, but the speaker field could be extended as SPEAKER and AI  are isomorphic up to a point (kept separate for easier hand regexing).
 - **PARENT**: Captures audience morphism without storing explicit audience details
-- **NULL Handling**: Hashed consistently (e.g., `HASH("NULL")`) for root messages
+- **NULL Handling**: Hashed consistently (e.g., `HASH("NULL")`) for root messages, so versioning possible.
+- **Indexing, and mapping will be compared with the top hash. If multiple responses from a model
+  is really an issue, then a nounce could be introduced, but aiming for bifunctor relations.
+
 
 This scheme ensures that messages are defined by their relationship to an audience (parent message), enabling a robust category theory-based model for conversations.
 
 ---
-*Document Version: 0.0.1*  
-*Last Updated: Tue 26 Aug 2025 06:09:37*  
+*Document Version: 0.0.2**
+*Last Updated: Tue 10 Sept 2025 07:06:12**  

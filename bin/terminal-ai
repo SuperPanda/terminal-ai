@@ -2,35 +2,49 @@
 # File: ./terminal-ai
 # Description: Script to Communicate and Log with AI.
 # Usage: ./terminal-ai [--output-dir=<OUTPUT_DIRECTORY_PATH>] [--output-file=<OUTPUT_FILE>] [--dry-run] [--help] [--verbose] <MSG_TO_SEND_TO_AI>
-# VIM: 
-#   :w !cat terminal-ai | xargs -0 terminal-ai --model="gpt-5-nano" ./terminal-ai -- "some message"
-# Logs extractable with '^\[[^\]]+\]'
-#
-# 
-# if wanting to write to a file instead of using the --input-file= 
-# optional '-o [<OPTION>[,<OPTION>*]' where i can skip the speaker, the response, 
-# the output to log, output to stdout, the metadata in log, the metadata in stdout.
-#
-# options need to be extendable so chunking or partial operations work with cache processing
-# or state operations, but like composable and sort. 
-#
-# DISABLE -o "NO_[USER|AI]_[STDOUT|FILE]
-# 1. Enable controlling output to stdout and to logs 
-#    partially managed with the whitespace property, sed -n '1,350{/^[^\ ]/d;s/^ //;p}' 2025-09-02.md 
-# 3. Use the outputdir as the base for context directories and ensure the output is generated there,
-#    infact the idea to have multi stream integration is outside the scope of this. 
-# 4. Allow a message id to be used as the parent via --parent-id (and a way to basically add the request,
-#    but not dispatch, so that the same request can be to sent to multiple agents.
-# 5. Route to the new response API
-# 6. Support deep seek
-#
-# The context directories work like
-# terminal-ai  --input-file=SOME_CONTEXT.CTX.d/SOME_PROMPT_CONCATENATED_WITH_CONTEXT.md --output-dir=SOME_CONTEXT.d --output-file=RESPONSE.md --
-# if you want to overwrite file... use terminal-ai -o '....' .... > FILE.md
-#
-#
 
+DEFAULT_MODEL="gpt-5-mini" # default
+DEFAULT_THINK_HARDER_MODEL="o3" # More accurate and precise and faster
+DEFAULT_TINY_MODEL="gpt-5-nano"
+ALTERNATE_MODEL="o4-mini" 
+ALTERNATE_THINK_HARDER_MODEL="gpt-5" # Less accurate and more general
+ALTERNATE_TINY_MODEL="gpt-4.1-nano"
 
+# ~~ normal ~~ 
+# MODEL="$DEFAULT_MODEL" 
+MODEL="$ALTERNATE_MODEL"
+# ~~ harder ~~
+# MODEL="$DEFAULT_THINK_HARDER_MODEL"
+# MODEL="$ALTERNATE_THINK_HARDER_MODEL"
+# ~~ tiny ~~
+# MODEL="$DEFAULT_TINY_MODEL"
+# MODEL="$ALTERNATE_TINY_MODEL"
+
+if [ ! -z ${TAI_PRINT_MODELS} ]; then
+MODELS_DISPLAY="$(cat <<EOF
+Cheap Models
+- gpt-5-mini
+- gpt-5-nano
+- gpt-4.1-mini
+- gpt-4.1-nano
+- gpt-4o-mini
+- o1-mini
+- o3-mini
+- o4-mini
+- codex-mini-latest
+
+Expensive Models
+- gpt-5
+- gpt-5-chat-latest
+- gpt-4.1
+- gpt-4o
+- o1
+- o3
+EOF
+)"
+echo "$MODELS_DISPLAY"
+exit
+fi
 
 DEFAULT_APP_NAME="terminal-ai" # terminal-ai for prefix, as tai is for plugins.
 APP_NAME="${TAI_APP_NAME:-$DEFAULT_APP_NAME}"
@@ -40,9 +54,9 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
 APP_CONFIG_DIR="${TAI_CONFIG_DIR:-$XDG_CONFIG_HOME/$APP_NAME}"
 APP_DATA_DIR="${TAI_DATA_DIR:-$XDG_DATA_HOME/$APP_NAME}"
-#
+
 LOG_STORAGE_PATH="$APP_DATA_DIR/transcripts/default"
-LOG_FILE="`date --rfc-3339=date`.md"
+LOG_FILE="$(date --rfc-3339=date).md"
 
 # Default values for optional arguments
 DRY_RUN=0
@@ -197,24 +211,20 @@ Speak() {
 }
 
 Record() {
-  # LIFTED TIMESTAMP TO SPEAK
+  # timestamp to Speak
   local speaker="$1"
   local speech="$2"
   local speech_ts="$3"
   local message_id="$4"
   local speech_metadata="$(printf "[%s, %s, %s]" "$speech_ts" "$speaker" "$message_id")"
+
   # SPEECH METADATA NEEDS TO BE CONSISTENT WHEN CALLED FROM AI OR USER.
-  
-  # THIS WILL BE WHERE TAI_OPT_
-  # echo "$speech_metadata"
+  # THIS WILL BE WHERE TAI_OPTION Will need to toggle.
+
   indent() {
      printf '%s\n' "$1" | sed 's/^/ /'
   }
-  
-  # speech="asd
-  # asd
-  # asd"
-  # speech_metadata="<!-- hi -->"
+
   
   playback() {
    _metadata="${1:-$speech_metadata}"
@@ -223,7 +233,7 @@ Record() {
   }
   playback 
 
-
+  # indented speech
   ispeech=$(indent "$speech")
   # playback "$speech_metadata" "$ispeech" >> /tmp/out
   # cat /tmp/out
@@ -243,56 +253,8 @@ AISpeak() {
   if [ "$DRY_RUN" -eq 1 ]; then
     ai_speech="<AI Response>"
   else
-    #    MODEL="gpt-5" # good for blah...
-    #    INCLUDE THE SUMMARY
-    # https://platform.openai.com/settings/organization/data-controls/sharing to see price
-    # HIGH LIMIT FREE TIER [DAILY TOKEN LIMIT DEFAULT = 10million]
-    # - gpt-5-mini
-    # - gpt-5-nano
-    # - gpt-4.1-mini
-    # - gpt-4.1-nano
-    # - gpt-4o-mini
-    # - o1-mini
-    # - o3-mini
-    # - o4-mini
-    # - codex-mini-latest
-    # 
-    # LOW LIMIT FREE TIER
-    # MODELS:
-    #   - gpt-5
-    #   - gpt-5-chat-latest
-    #   - gpt-4.1
-    #   - gpt-4o
-    #   - o1
-    #   - o3
-    #
-    # Need to add deepseek
-    # - deepseek-reasoning
-    # - deepseek-completion
-    # MODEL="gpt-4.1"
     
-    # override with TAI__MODEL=...
-    # todo: reasoning support
-    # todo: decide command params and implementation
-    #       for ...
-    DEFAULT_MODEL="gpt-5-mini" # default
-    DEFAULT_THINK_HARDER_MODEL="o3" # --think=harder,different
-    DEFAULT_TINY_MODEL="gpt-5-nano"
-    ALTERNATE_MODEL="o4-mini" # --think-different -t harder -t different 
-    ALTERNATE_THINK_HARDER_MODEL="gpt-5" # --think=harder  OR maybe named differently
-    ALTERNATE_TINY_MODEL="gpt-4.1-nano"
-   
-    # ~~ normal ~~ 
-    # MODEL="$DEFAULT_MODEL" 
-    # MODEL="$ALTERNATE_MODEL"
-    # ~~ harder ~~
-    MODEL="$DEFAULT_THINK_HARDER_MODEL"
-    # MODEL="$ALTERNATE_THINK_HARDER_MODEL"
-    # ~~ tiny ~~
-    # MODEL="$DEFAULT_TINY_MODEL"
-    # MODEL="$ALTERNATE_TINY_MODEL"
     INSTRUCTION="You are a Terminal Based Assistant, which provides Responses Compliant to CommonMark Spec (unless otherwise specified)."
-    # NEED TO BE ABLE TO SUPPORT RESPONSE API 
     request_body=$(jq -n \
       --arg model "${TAI_MODEL:-$MODEL}" \
       --arg system "system" \
@@ -313,8 +275,9 @@ AISpeak() {
           ]
           }
         ')
-    # NEED ONE FOR DEEPSEEK.   
+
     # CHANGE TO RESPONSE
+    # NEED TO SUBSTITUTE TO RESPONSE.
     # response=$(curl -s https://api.openai.com/v1/response \
     response=$(curl -s https://api.openai.com/v1/chat/completions \
       -H "Content-Type: application/json" \
@@ -332,10 +295,13 @@ AISpeak() {
   echo "$ai_speech"
 }
 
-
 ExtractMetadata() {
   local response="$1"
-  
+  # Will just put all tokens per API respond kind in token_usage="$(endpoint_token_filter "openai")
+  #  where extract_token_metadata(){
+  #     if [ ... some operation ]; { echo $response} | jq -r '.usage' };
+  #     ,
+  #  }
   # Using jq to extract the required fields from the JSON response
   local total_tokens
   local prompt_tokens
