@@ -55,6 +55,8 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_CONFIG_DIR="${TAI_CONFIG_DIR:-$XDG_CONFIG_HOME/$APP_NAME}"
 APP_DATA_DIR="${TAI_DATA_DIR:-$XDG_DATA_HOME/$APP_NAME}"
 
+DEFAULT_ENV_FILE="${APP_CONFIG_DIR}/.default.env"
+
 LOG_STORAGE_PATH="$APP_DATA_DIR/transcripts/default"
 LOG_FILE="$(date --rfc-3339=date).md"
 
@@ -65,6 +67,7 @@ OUTPUT_DIR="$LOG_STORAGE_PATH"
 OUTPUT_FILE="$LOG_FILE"
 INPUT_FILE=""
 ATTACHMENT=""
+ENV_FILE=""
 
 # Function to display help
 show_help() {
@@ -105,7 +108,7 @@ while [[ "$1" == --* ]]; do
       shift
       ;;
     --env-file=*)
-      source "${1#*=}"
+      ENV_FILE="${1#*=}"
       shift
       ;;
     --help)
@@ -128,9 +131,31 @@ while [[ "$1" == --* ]]; do
   esac
 done
 
+# Environment file handling - cleaner logic
+if [ -n "$TAI_ENV_FILE" ]; then
+  # TAI_ENV_FILE environment variable is set
+  if [ -f "$TAI_ENV_FILE" ]; then
+    source "$TAI_ENV_FILE"
+  else
+    echo "Error: TAI_ENV_FILE specified but file does not exist: $TAI_ENV_FILE" >&2
+    exit 1
+  fi
+elif [ -n "$ENV_FILE" ]; then
+  # --env-file argument was provided
+  if [ -f "$ENV_FILE" ]; then
+    source "$ENV_FILE"
+  else
+    echo "Error: --env-file specified but file does not exist: $ENV_FILE" >&2
+    exit 1
+  fi
+elif [ -f "$DEFAULT_ENV_FILE" ]; then
+  # Use default env file if it exists
+  source "$DEFAULT_ENV_FILE"
+fi
+
 # if output-dir set manually 
 if [ "$LOG_STORAGE_PATH" != "$OUTPUT_DIR" ]; then
-  # DO NOT CREAT IF PROVIDED PATH IS NOT A DIRECTORY 
+  # DO NOT CREATE IF PROVIDED PATH IS NOT A DIRECTORY 
   # AS IT MIGHT BE WRONG.
   if [ ! -d "$OUTPUT_DIR" ]; then
     echo "PROVIDED OUTPUT PATH IS NOT A VALID DIRECTORY: $OUTPUT_DIR" >&2; exit 1; 
@@ -245,7 +270,6 @@ UserSpeak() {
   local user_speech="$1"
   echo "$user_speech"
 }
-
 
 AISpeak() {
   local prompt="$1"
