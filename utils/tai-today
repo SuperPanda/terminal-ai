@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+TODAYS_FILE="$(fd -e md . "$HOME/.local/share/terminal-ai/transcripts/default" | sort | tail -n1)"
+if [ "$1" == "open" ]; then
+  bat "$TODAYS_FILE"
+elif [ "$1" == "lines" ]; then
+  bat "$TODAYS_FILE" | sed -n "${2:-1},${3:-"$(wc -l "$TODAYS_FILE" | cut -f1 -d\ )"}p"
+elif [ "$1" == "index" ]; then
+  grep -P --line-number "^\[" "$TODAYS_FILE"
+  wc -l "$TODAYS_FILE" | cut -f1 -d\  | xargs printf "%s: EOF\n"
+elif [ "$1" == "msg" ]; then
+  tai-today index | tail -n+"${2:-1}" | head -n2 | cut -f1 -d\: | xargs -n2 xargs tai-today lines | head -n-1
+else
+  echo "$TODAYS_FILE"
+fi
