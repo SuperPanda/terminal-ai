@@ -1,88 +1,154 @@
-# Message ID Scheme: Audience Concept via Parent Message ID
+# Message ID Specification
 
-## 1. Message ID Definition
+**Version:** 0.0.3
+**Status:** Draft
 
-The Message ID is designed to capture both the speech identity and the audience identity through a structured hash-based approach. It consists of two components:
+## Overview
 
-- **Speech Identity**: `HASH(TIMESTAMP + SPEAKER)`
-  - Uniquely identifies the speech act based on the timestamp (time of utterance) and the speaker (resource that produced the message)
-  - Ensures that each speech act has a unique origin point, even if content is similar
+Messages are identified by their relationship to prior speech.
 
-- **Audience Identity**: `HASH(PARENT_MESSAGE_ID)`
-  - Represents the message that prompted this response (the audience)
-  - For a root message, the parent is `NULL`, which is hashed consistently to form an initial object
+Each message captures:
+- **Speech identity**: who spoke and when
+- **Audience identity**: what speech prompted this response
 
-The full Message ID is formatted as: `[Speech Identity]-[Audience Identity]` (e.g., `a3659d9c-21726c10`).
+## Definitions
 
-## 2. Audience Concept: Parent Message ID as Audience
+### Speech
 
-The audience is not explicitly stored as a separate entity but is implied through the parent message ID:
+A speech is a speaker at a specific time. Not what was said, but who spoke and when.
 
-- **Parent Message ID**: Points to the message that was "heard" or "observed" by the speaker, triggering the response
-- **Root Messages**: If no message was observed (e.g., the first message in a conversation), the parent is `NULL`
-- **Category Theory Perspective**: The parent ID defines the morphism from the audience message to the current message
-- **Thought Support**: When a speaker responds to itself (internal thought), the parent ID points to its own previous message, creating a self-referential morphism
-
-## 3. Examples of Message IDs
-
-### Root Message (No Audience)
 ```
-Speaker: SPEAKER_A
-Timestamp: T1
-Parent: NULL
-Speech Identity: HASH(T1 + SPEAKER_A) → a3659d9c
-Audience Identity: HASH(NULL) → 21726c10
-Message ID: a3659d9c-21726c10
+Speech := (Speaker, Timestamp)
 ```
 
-### Response to Root Message
+Two particles cannot occupy the same space at the same time.
+Two speeches cannot share the same `(Speaker, Timestamp)` pair.
+
+**Speech Identity:**
 ```
-Speaker: SPEAKER_B
-Timestamp: T2
-Parent ID: a3659d9c-21726c10
-Speech Identity: HASH(T2 + SPEAKER_B) → 6b86b273
-Audience Identity: HASH(a3659d9c-21726c10) → 366d16a1
-Message ID: 6b86b273-366d16a1
+SpeechID := HASH8(Speaker, Timestamp)
 ```
 
-### Self-Response (Thought)
+Where `HASH8` produces 8 hexadecimal characters from SHA-256. Content is attached metadata, not part of identity.
+
+### Message
+
+A message is a speech together with what it responds to.
+
 ```
-Speaker: SPEAKER_A
-Timestamp: T3
-Parent ID: a3659d9c-21726c10
-Speech Identity: HASH(T3 + SPEAKER_A) → 9d0c83bd
-Audience Identity: HASH(a3659d9c-21726c10) → 366d16a1
-Message ID: 9d0c83bd-366d16a1
+Message := (Speech, ParentSpeech)
 ```
 
-## 4. Key Properties Supported
+Where `ParentSpeech` is:
+- The SpeechID of another speech (what prompted this), or
+- `NULL` for root utterances
 
-- **Coherence with Multiple Responses**: Multiple messages can respond to the same parent
-- **Coherence with Talking to Self**: Self-responses are captured using same speaker with different timestamps
-- **Morphism Tracking**: Audience identity enables backward traversal of conversation graph
-- **Unique Morphisms**: Initial object (NULL parent) ensures unique morphisms from root
-- **Support for Multiple Agents**: Different speakers can respond to the same message
+**Audience Identity:**
 
-## 5. Handling Streaming and Chunks
+The audience is what is responded to—the parent speech:
+```
+AudienceID := SpeechID(parent_speech)     if replying
+           := HASH8("NULL")              if root
+```
 
-For streaming scenarios where a speech act is delivered in chunks:
+**Message Identity:**
+```
+MessageID := "<SpeechID>-<AudienceID>"
+```
 
-- **Same Speech Identity**: All chunks share the same timestamp and speaker
-- **Consistent Audience Identity**: All chunks respond to the same parent message
-- **Efficient Retrieval**: Chunks can be grouped by Message ID for reconstruction
+The structure `speech-audience` encodes a morphism from audience to speech.
 
-## 6. Notes
+## Examples
 
-- **TIMESTAMP**: Timestamp is not required for uniqueness, as the speech is what ever is represented by the hash(timestamp,speaker)+[parent-message-id/2]  Must be precise enough (e.g., microseconds) to ensure uniqueness
-- **SPEAKER**: Identifies the resource or agent, enabling multi-entity responses. For now it is SPEAKER and AI, but the speaker field could be extended as SPEAKER and AI  are isomorphic up to a point (kept separate for easier hand regexing).
-- **PARENT**: Captures audience morphism without storing explicit audience details
-- **NULL Handling**: Hashed consistently (e.g., `HASH("NULL")`) for root messages, so versioning possible.
-- **Indexing, and mapping will be compared with the top hash. If multiple responses from a model
-  is really an issue, then a nounce could be introduced, but aiming for bifunctor relations.
+### Root Message
 
+```
+Speaker:    USER
+Timestamp:  T1
+Parent:     NULL
 
-This scheme ensures that messages are defined by their relationship to an audience (parent message), enabling a robust category theory-based model for conversations.
+SpeechID    = HASH8(USER, T1)      → a3659d9c
+AudienceID  = HASH8("NULL")        → 21726c10
+MessageID   = a3659d9c-21726c10
+```
 
----
-*Document Version: 0.0.2**
-*Last Updated: Tue 10 Sept 2025 07:06:12**  
+### Response
+
+```
+Speaker:    AI
+Timestamp:  T2
+Parent:     a3659d9c-21726c10
+
+SpeechID    = HASH8(AI, T2)        → 6b86b273
+AudienceID  = a3659d9c             (parent's SpeechID)
+MessageID   = 6b86b273-a3659d9c
+```
+
+### Self-Response
+
+```
+Speaker:    USER
+Timestamp:  T3
+Parent:     a3659d9c-21726c10
+
+SpeechID    = HASH8(USER, T3)      → 9d0c83bd
+AudienceID  = a3659d9c
+MessageID   = 9d0c83bd-a3659d9c
+```
+
+## Structure
+
+Messages form a directed graph:
+- **Nodes**: Speech identities (who-when pairs)
+- **Edges**: Messages connecting parent speech to current speech
+
+Each MessageID encodes one edge:
+```
+MessageID = S_current - S_parent
+```
+
+Read as: "current speech responding to parent speech"
+
+```
+HASH8("NULL") → root_speech → response_speech → continuation
+                    ↓
+                  branch_speech
+```
+
+Multiple messages may share the same `AudienceID`, creating branches from a single parent speech. This is not a conflict—it's multiple responses to the same prompt.
+
+### Conversation Threads
+
+A thread is a path through the graph:
+```
+s₀ → s₁ → s₂ → s₃
+```
+
+Where each arrow is a message whose `AudienceID` equals the prior message's `SpeechID`.
+
+### Self-Chains
+
+When `Speaker(sᵢ) = Speaker(sᵢ₊₁)`, the speaker responds to themselves:
+```
+USER[T1] → USER[T2] → USER[T3]
+```
+
+This captures internal thought or continued monologue. Different snapshots of the same entity.
+
+## Properties
+
+**Composition:** Messages compose by chaining. If message M₁ has `AudienceID = S₀` and `SpeechID = S₁`, and message M₂ has `AudienceID = S₁`, then M₂ responds to M₁.
+
+**Self-reference:** When `Speaker` is constant across messages, the graph represents internal thought or continued monologue.
+
+**Roots:** All conversation threads trace back to messages with `AudienceID = HASH8("NULL")`.
+
+**Determinism:** Given the same `(Speaker, Timestamp)` pair, `SpeechID` is invariant. Given the same parent, `AudienceID` is invariant.
+
+## Notes
+
+- Timestamp precision should be sufficient to prevent collisions (seconds are typically adequate; microseconds available if needed)
+- Speaker can be any identifier: `USER`, `AI`, `AI:model-name`, `TOOL:name`
+- Content is separate from identity; changing content doesn't change the message's structural position
+- Parallel responses to the same parent create distinct branches, not conflicts
+- **Critical distinction:** `AudienceID` is the *SpeechID of the parent speech*, not a hash of the parent's full MessageID. This makes morphisms explicit and enables direct graph traversal.
