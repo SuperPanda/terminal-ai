@@ -10,7 +10,7 @@ set -euo pipefail
 export GENERATED_FILE_PREFIX="changes"
 export REPO_ROOT=${REPO_ROOT:-"$(git rev-parse --show-toplevel)"}
 export TAI_BIN="${TAI_BIN:-${REPO_ROOT}/target/debug/terminal-ai}"
-export PROMPT="${PROMPT:-"Write a git commit message for the provided git diff --cached output using conventional git commit messages respond in plain text not markdown \n"}"
+export PROMPT="${PROMPT:-"<INSTRUCTION> Write a git commit message for the provided git diff --cached output using conventional git commit messages respond suitable for direct inclusion as a git commit multi-line message (plain text not markdown). Extra information is provided in the body structured for navigation, discoverability and changelogs. Using syntax to improve readability, such as single quotes around filepaths, and configuration env variables, parameters and arguments. <END INSTRUCTION> \n"}"
 export TAI_ARGS="-o NO_USER_STDOUT,CONTENT_ONLY --model=gpt-5.4"
 export TAI_TOOLS_PATH="${TAI_TOOLS_PATH:-"${REPO_ROOT}/tools"}"
 export REPORT_PATH="${REPO_ROOT}/.generated/${GENERATED_FILE_PREFIX}-$(uuidgen -7)"
