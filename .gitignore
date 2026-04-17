@@ -1,3 +1,6 @@
+# Rust
+target/
+vendor/
+# Workspace
 .generated/
 .stash/
-**/target/
