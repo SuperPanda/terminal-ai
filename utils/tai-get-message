@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEFAULT_TRANSCRIPT_DIRECTORY="${HOME}/.local/share/terminal-ai/transcripts/default"
+
+TRANSCRIPT_DIRECTORY_OVERRIDE=""
+TRANSCRIPT_FILE_OVERRIDE=""
+OFFSET_VALUE="${OFFSET:-0}"
+
+# ---------- Usage ----------
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tai-get-message [OPTIONS] [OFFSET]
+
+Extract one TerminalAI message.
+
+Options:
+  --offset OFFSET  Message offset. 0 means latest, 1 means previous.
+  --dir DIR        Search transcript markdown files in this directory.
+  --file FILE      Search only this transcript file.
+  -h, --help       Show this help.
+
+Environment:
+  OFFSET               Message offset default
+  TRANSCRIPT_FILE      Transcript file override
+  TAI_TRANSCRIPT_FILE  Transcript file override
+  TRANSCRIPT_DIR       Transcript directory override
+  TAI_TRANSCRIPT_DIR   Transcript directory override
+
+Directory precedence:
+  1. --dir DIR
+  2. TRANSCRIPT_DIR
+  3. TAI_TRANSCRIPT_DIR
+  4. $HOME/.local/share/terminal-ai/transcripts/default
+
+File precedence:
+  1. --file FILE
+  2. TRANSCRIPT_FILE
+  3. TAI_TRANSCRIPT_FILE
+  4. if no file is given, search across all *.md files in the resolved directory
+
+Offset:
+  OFFSET=0  latest message
+  OFFSET=1  previous message
+  OFFSET=2  two messages back
+
+Examples:
+  tai-get-message
+  tai-get-message 1
+  tai-get-message --offset 2
+  tai-get-message --dir .generated/transcripts
+  tai-get-message --file .generated/transcripts/2026-06-21.md
+EOF
+}
+
+die() {
+  printf "tai-get-message: %s\n" "$*" >&2
+  exit 1
+}
+
+# ---------- Validation ----------
+
+is_nonnegative_integer() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+# ---------- Transcript Paths ----------
+
+resolve_transcript_directory() {
+  if [[ -n "${TRANSCRIPT_DIRECTORY_OVERRIDE}" ]]; then
+    printf "%s\n" "${TRANSCRIPT_DIRECTORY_OVERRIDE}"
+  elif [[ -n "${TRANSCRIPT_DIR:-}" ]]; then
+    printf "%s\n" "${TRANSCRIPT_DIR}"
+  elif [[ -n "${TAI_TRANSCRIPT_DIR:-}" ]]; then
+    printf "%s\n" "${TAI_TRANSCRIPT_DIR}"
+  else
+    printf "%s\n" "${DEFAULT_TRANSCRIPT_DIRECTORY}"
+  fi
+}
+
+resolve_transcript_file_override() {
+  if [[ -n "${TRANSCRIPT_FILE_OVERRIDE}" ]]; then
+    printf "%s\n" "${TRANSCRIPT_FILE_OVERRIDE}"
+  elif [[ -n "${TRANSCRIPT_FILE:-}" ]]; then
+    printf "%s\n" "${TRANSCRIPT_FILE}"
+  elif [[ -n "${TAI_TRANSCRIPT_FILE:-}" ]]; then
+    printf "%s\n" "${TAI_TRANSCRIPT_FILE}"
+  fi
+}
+
+list_transcript_files_null() {
+  local transcript_directory
+
+  transcript_directory="$(resolve_transcript_directory)"
+
+  [[ -d "${transcript_directory}" ]] ||
+    die "transcript directory not found: ${transcript_directory}"
+
+  if command -v fd >/dev/null 2>&1; then
+    fd -H -t f -e md -0 . "${transcript_directory}" | sort -z
+  else
+    find "${transcript_directory}" -type f -name '*.md' -print0 | sort -z
+  fi
+}
+
+# ---------- Remove Transcript Specifics -----------
+
+get_content() {
+  sed -n '/^\[/,/^[^ ]/{/^[^ ]/d;p}' | sed 's/^ //'
+}
+
+# ---------- Line Operations ----------
+
+total_lines() {
+  wc -l <"$1" | tr -d '[:space:]'
+}
+
+message_start_lines() {
+  grep -n -E '^\[[^]]+\]$' "$1" |
+    cut -d ':' -f 1 ||
+    true
+}
+
+message_count() {
+  message_start_lines "$1" |
+    wc -l |
+    tr -d '[:space:]'
+}
+
+# ---------- Message Operations ----------
+
+extract_message_from_file_by_index() {
+  local transcript_file
+  local target_index
+  local total
+  local count
+  local start_line
+  local end_line
+  local next_start_line
+  local -a start_lines
+
+  transcript_file="$1"
+  target_index="$2"
+
+  [[ -f "${transcript_file}" ]] ||
+    die "transcript file not found: ${transcript_file}"
+
+  mapfile -t start_lines < <(message_start_lines "${transcript_file}")
+
+  count="${#start_lines[@]}"
+
+  if [[ "${count}" -eq 0 ]]; then
+    die "no message headers found in: ${transcript_file}"
+  fi
+
+  if [[ "${target_index}" -lt 0 ]] || [[ "${target_index}" -ge "${count}" ]]; then
+    die "message index is out of range for ${transcript_file}: ${target_index}"
+  fi
+
+  total="$(total_lines "${transcript_file}")"
+  start_line="${start_lines[${target_index}]}"
+
+  if [[ "${target_index}" -eq "$((count - 1))" ]]; then
+    end_line="${total}"
+  else
+    next_start_line="${start_lines[$((target_index + 1))]}"
+    end_line="$((next_start_line - 1))"
+  fi
+
+  sed -n "${start_line},${end_line}p" "${transcript_file}"
+}
+
+extract_message_from_file_by_offset() {
+  local transcript_file
+  local offset
+  local count
+  local target_index
+
+  transcript_file="$1"
+  offset="$2"
+
+  [[ -f "${transcript_file}" ]] ||
+    die "transcript file not found: ${transcript_file}"
+
+  count="$(message_count "${transcript_file}")"
+
+  if [[ "${count}" -eq 0 ]]; then
+    die "no message headers found in: ${transcript_file}"
+  fi
+
+  target_index="$((count - 1 - offset))"
+
+  if [[ "${target_index}" -lt 0 ]] || [[ "${target_index}" -ge "${count}" ]]; then
+    die "OFFSET is out of range. OFFSET=${offset}, message count=${count}"
+  fi
+
+  extract_message_from_file_by_index "${transcript_file}" "${target_index}"
+}
+
+extract_message_from_directory_by_offset() {
+  local offset
+  local remaining
+  local transcript_file
+  local count
+  local target_index
+  local file_index
+  local -a transcript_files
+
+  offset="$1"
+  remaining="${offset}"
+
+  mapfile -d '' -t transcript_files < <(list_transcript_files_null)
+
+  if [[ "${#transcript_files[@]}" -eq 0 ]]; then
+    die "no transcript markdown files found in: $(resolve_transcript_directory)"
+  fi
+
+  for ((file_index = ${#transcript_files[@]} - 1; file_index >= 0; file_index--)); do
+    transcript_file="${transcript_files[${file_index}]}"
+    count="$(message_count "${transcript_file}")"
+
+    if [[ "${count}" -eq 0 ]]; then
+      continue
+    fi
+
+    if [[ "${remaining}" -lt "${count}" ]]; then
+      target_index="$((count - 1 - remaining))"
+      extract_message_from_file_by_index "${transcript_file}" "${target_index}"
+      return 0
+    fi
+
+    remaining="$((remaining - count))"
+  done
+
+  die "OFFSET is out of range. OFFSET=${offset}"
+}
+
+# ---------- Main ----------
+
+main() {
+  local positional_offset_seen
+  local transcript_file_override
+
+  positional_offset_seen="0"
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+    --offset)
+      [[ "$#" -ge 2 ]] || die "--offset requires a value"
+      OFFSET_VALUE="$2"
+      positional_offset_seen="1"
+      shift 2
+      ;;
+    --dir)
+      [[ "$#" -ge 2 ]] || die "--dir requires a value"
+      TRANSCRIPT_DIRECTORY_OVERRIDE="$2"
+      shift 2
+      ;;
+    --file)
+      [[ "$#" -ge 2 ]] || die "--file requires a value"
+      TRANSCRIPT_FILE_OVERRIDE="$2"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      if [[ "${positional_offset_seen}" = "1" ]]; then
+        die "unexpected extra argument: $1"
+      fi
+
+      OFFSET_VALUE="$1"
+      positional_offset_seen="1"
+      shift
+      ;;
+    esac
+  done
+
+  is_nonnegative_integer "${OFFSET_VALUE}" ||
+    die "OFFSET must be a non-negative integer: ${OFFSET_VALUE}"
+
+  transcript_file_override="$(resolve_transcript_file_override)"
+
+  if [[ -n "${transcript_file_override}" ]]; then
+    extract_message_from_file_by_offset "${transcript_file_override}" "${OFFSET_VALUE}"
+  else
+    extract_message_from_directory_by_offset "${OFFSET_VALUE}"
+  fi
+}
+
+main "$@" | get_content

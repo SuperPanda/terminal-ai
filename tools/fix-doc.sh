@@ -16,7 +16,8 @@ export GENERATED_FILE_PREFIX="${GENERATED_FILE_PREFIX:-fix-doc}"
 export TAI_TRANSCRIPT_DIR="${REPO_ROOT}/.generated/transcripts"
 export TAI_BIN="${TAI_BIN:-"${REPO_ROOT}/target/release/terminal-ai"}"
 export TAI_MODEL="${TAI_MODEL:-gpt-5.5}"
-export REPORT_PATH="${REPO_ROOT}/.generated/${GENERATED_FILE_PREFIX}-$(uuidgen -7)"
+REPORT_PATH="${REPO_ROOT}/.generated/${GENERATED_FILE_PREFIX}-$(uuidgen -7)"
+export REPORT_PATH
 export PROMPT="${PROMPT:-"This is a one shot prompt, do not ask followups. Fix the provided documentation file using the referenced files and directories as the source of truth. Only propose changes to the documentation document. Provide an extensive and complete solution, preferably as a unified diff or complete replacement content."}"
 
 usage() {
@@ -58,7 +59,7 @@ render_file() {
   printf '\n─────┬──────────────────────────────────────────────────────────────────────────\n'
   printf '     │ File: %s\n' "${relative_path}"
   printf '─────┼──────────────────────────────────────────────────────────────────────────\n'
-  sed = "${file}" | sed 'N;s/\n/\t/' | sed 's/^/ /'
+  sed '=' "${file}" | sed 'N;s/\n/\t/' | sed 's/^/ /'
   printf '─────┴──────────────────────────────────────────────────────────────────────────\n'
 }
 
