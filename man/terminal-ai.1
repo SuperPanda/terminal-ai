@@ -1,0 +1,762 @@
+.TH TERMINAL-AI 1 "2026-10-28" "terminal-ai 0.2.0" "User Commands"
+.SH NAME
+terminal-ai \- send prompts to a chat-completions backend and record responses
+.SH SYNOPSIS
+.B terminal-ai
+.RI [ OPTIONS ]
+.RB [ \-\- ]
+.RI [ PROMPT ...]
+.PP
+.B terminal-ai
+.RI [ OPTIONS ]
+.B <
+.I prompt-file
+.PP
+.B terminal-ai
+.BR \-\-help " | " \-\-version
+.SH DESCRIPTION
+.B terminal-ai
+sends a single user message to a chat-completions-compatible backend.
+The message consists of command-line or standard-input text, followed
+by any attached text files.
+A fixed system message requests CommonMark-compliant responses.
+.PP
+The program supports three independently formatted output destinations:
+standard output, an append-only transcript, and an optional artifact file.
+Standard error carries diagnostics, interactive prompts, and response metadata.
+.PP
+Each invocation performs one request.
+Existing transcripts are not read or sent as conversation history.
+.B \-\-parent-id
+affects recorded message identifiers only; it does not provide context
+to the backend.
+.PP
+The request URL is the configured base URL, with trailing slashes removed,
+followed by
+.BR /v1/chat/completions .
+The default endpoint is therefore
+.BR https://api.openai.com/v1/chat/completions .
+Only the first returned choice is used.
+Responses are buffered rather than streamed.
+.SS Important output behavior
+In version 0.2.0 as supplied, user turns are not suppressed by default.
+Both the composed user prompt and the AI response are written to standard
+output, the transcript, and any configured artifact file.
+This differs from the response-only behavior described in the embedded
+help and source overview.
+.PP
+For response-only standard output and artifact output, specify:
+.PP
+.nf
+-o NO_USER_STDOUT,NO_USER_ARTIFACT
+.fi
+.PP
+Formatting presets such as
+.B CONTENT_ONLY
+remove decorations; they do not select which speaker is emitted.
+.SH INPUT
+If positional prompt arguments are present, they are joined with single
+spaces and used as the base prompt.
+Standard input is then ignored.
+.PP
+If no positional prompt arguments are present:
+.IP \(bu 2
+When standard input is a terminal, the program writes
+.B "Enter prompt:"
+to standard error and reads one line.
+.IP \(bu 2
+Otherwise, the program reads standard input to end-of-file.
+.PP
+Whitespace-only input read from standard input is rejected.
+Positional prompt arguments do not receive the same emptiness check.
+.PP
+Each
+.B \-\-input-file
+is read as UTF-8 text and appended in command-line order using:
+.PP
+.nf
+--- (@attachment: filename.ext) ---
+<file contents>
+.fi
+.PP
+Only the basename appears in the attachment label.
+Attachments do not replace the base prompt: without positional text,
+the program still reads standard input.
+Files are sent as text within the user message, not as separate API uploads.
+.SH OPTIONS
+Options accepting values support both a separate argument and an equals
+form, such as
+.B "\-\-model NAME"
+and
+.BR "\-\-model=NAME" .
+Recognized short value options also support equals forms such as
+.BR "\-m=NAME" .
+Concatenated short forms such as
+.B \-mNAME
+and grouped short options are not implemented.
+.PP
+For repeated scalar options, the last value wins.
+Input-file options accumulate; output-control specifications are applied
+in order.
+.TP
+.BR \-h ", " \-\-help
+Print help to standard output and exit.
+.TP
+.BR \-V ", " \-\-version
+Print version
+.B 0.2.0
+to standard output and exit.
+.TP
+.BR \-m ", " \-\-model " " \fIMODEL\fR
+Select the requested model.
+Default:
+.BR gpt-5.4 .
+.TP
+.BR \-b ", " \-\-base-url " " \fIURL\fR
+Set the API base URL.
+Default:
+.BR https://api.openai.com .
+Do not include
+.B /v1/chat/completions
+in this value; the program appends it.
+.TP
+.BR \-i ", " \-\-input-file " " \fIFILE\fR
+Append a text attachment to the prompt.
+May be repeated.
+Missing or unreadable attachments are fatal errors.
+.TP
+.BI \-\-env-file " FILE"
+Select an additional configuration file.
+The process environment variable
+.B TAI_ENV_FILE
+takes precedence over this option.
+A nonexistent explicitly selected file is a fatal error.
+.TP
+.B \-\-dry-run
+Skip the API request and use the literal response
+.BR "<AI Response>" .
+Input processing, transcript and artifact writes, timestamps, and message
+ID generation still occur.
+.TP
+.B \-\-verbose
+Write the raw backend response body to standard error before parsing it.
+This may expose AI response content in diagnostics.
+.TP
+.BI \-\-transcript-dir " DIRECTORY"
+Set the transcript directory.
+A nondefault directory must already exist.
+.TP
+.BI \-\-output-dir " DIRECTORY"
+Legacy alias for
+.BR \-\-transcript-dir .
+This does not set the artifact output path.
+.TP
+.BI \-\-transcript-file " FILE"
+Set the transcript filename, joined to the transcript directory.
+Default: the local date at startup followed by
+.BR .md ,
+for example
+.BR 2026-10-28.md .
+.TP
+.B \-\-no-transcript
+Disable transcript writes.
+This does not disable standard output or artifact output.
+Directory validation and default transcript directory creation still occur.
+.TP
+.BR \-O ", " \-\-output-file " " \fIFILE\fR
+Write an additional artifact file.
+The default is no artifact file.
+When configured, output is appended unless
+.B \-\-overwrite-output-file
+is enabled.
+Parent directories are not created.
+.TP
+.B \-\-overwrite-output-file
+Truncate the artifact file for each rendered, permitted turn.
+With default speaker policy, the user turn is written first and then
+replaced by the AI turn.
+The operation is not an atomic replacement.
+.TP
+.BI \-\-parent-id " ID"
+Use an explicit parent message ID for the recorded user turn.
+The AI turn is parented to that user turn.
+No earlier messages are loaded or transmitted.
+.TP
+.BR \-o ", " \-\-output-control " " \fISPEC\fR
+Apply comma-separated output-control tokens.
+May be repeated.
+See OUTPUT CONTROL.
+.TP
+.B \-\-
+Stop option parsing.
+All remaining arguments become prompt text.
+.SH CONFIGURATION
+For ordinary settings, precedence from highest to lowest is:
+.IP 1. 3
+Command-line option, where available.
+.IP 2. 3
+Process environment.
+.IP 3. 3
+Explicit configuration file selected by
+.B TAI_ENV_FILE
+or
+.BR \-\-env-file .
+.IP 4. 3
+The application's
+.B config.env
+file.
+.IP 5. 3
+The application's legacy
+.B .default.env
+file.
+.IP 6. 3
+Compiled defaults.
+.PP
+Output-control tokens are applied after per-channel environment settings.
+Boolean command-line switches force their setting on; they have no
+corresponding force-off option.
+.SS Exceptions
+.B TAI_ENV_FILE
+in the process environment overrides
+.BR \-\-env-file ,
+rather than the other way around.
+It is not resolved from configuration-file contents.
+.PP
+.BR HOME ,
+.BR XDG_CONFIG_HOME ,
+.BR XDG_DATA_HOME ,
+and
+.B TAI_APP_NAME
+are read only from the process environment.
+Putting them in a configuration file does not change directory discovery.
+.PP
+Transcript directory selection is:
+command line;
+process
+.BR TAI_TRANSCRIPT_DIR ;
+process
+.BR TAI_OUTPUT_DIR ;
+file
+.BR TAI_TRANSCRIPT_DIR ;
+file
+.BR TAI_OUTPUT_DIR ;
+default.
+.SS File syntax
+Configuration files contain simple
+.B KEY=VALUE
+assignments.
+Whitespace around keys and values is trimmed.
+Surrounding single or double quotes are stripped.
+Later assignments of the same key in a file replace earlier assignments.
+.PP
+Everything after the first
+.B #
+on each line is discarded, even inside quotes.
+Blank and malformed lines are ignored.
+Shell expansion, variable interpolation, escape processing, and
+.B export
+syntax are not supported.
+Files are parsed into local maps; the process environment is not modified.
+.PP
+Missing default files are ignored.
+Read failures, including an unreadable explicit file that exists,
+silently produce an empty map.
+A nonexistent explicit file is an error.
+.SS Boolean values
+Unless otherwise noted, true values are
+.BR 1 ,
+.BR true ,
+.BR yes ,
+and
+.BR on ,
+case-insensitively, with surrounding whitespace ignored.
+Any other present value, including an empty value, is false.
+.PP
+Empty process or file values for ordinary string settings such as
+model, base URL, API key, transcript filename, and speaker labels
+are treated as unset.
+Path settings do not consistently apply this rule; avoid empty paths.
+.SH ENVIRONMENT
+The following application settings may be supplied through the process
+environment or configuration files unless marked process-only.
+.TP
+.B OPENAI_API_KEY
+Optional bearer token.
+When set to a nonempty value, an
+.B Authorization: Bearer
+header is sent.
+There is no command-line API-key option.
+.TP
+.B TAI_MODEL
+Requested model.
+Default:
+.BR gpt-5.4 .
+.TP
+.B TAI_BASE_URL
+API base URL.
+Default:
+.BR https://api.openai.com .
+.TP
+.B TAI_ENV_FILE
+Explicit configuration file path; process-only.
+Overrides
+.BR \-\-env-file .
+.TP
+.B TAI_APP_NAME
+Application directory name under the XDG configuration and data homes;
+process-only.
+Default:
+.BR terminal-ai .
+.TP
+.B HOME
+Home directory used for XDG fallbacks; process-only.
+If absent, the program uses
+.BR /tmp .
+.TP
+.B XDG_CONFIG_HOME
+Configuration root; process-only.
+Default:
+.BR $HOME/.config .
+.TP
+.B XDG_DATA_HOME
+Data root; process-only.
+Default:
+.BR $HOME/.local/share .
+.TP
+.B TAI_TRANSCRIPT_DIR
+Transcript directory.
+Default:
+.BR $XDG_DATA_HOME/$TAI_APP_NAME/transcripts/default ,
+with the fallbacks described above.
+.TP
+.B TAI_OUTPUT_DIR
+Legacy alias for
+.BR TAI_TRANSCRIPT_DIR .
+Does not select an artifact file.
+.TP
+.B TAI_TRANSCRIPT_FILE
+Transcript filename.
+Default:
+.BR YYYY-MM-DD.md .
+.TP
+.B TAI_NO_TRANSCRIPT
+Disable transcript writes.
+Default: false.
+.TP
+.B TAI_OUTPUT_FILE
+Artifact output path.
+Default: unset.
+.TP
+.B TAI_OVERWRITE_OUTPUT_FILE
+Truncate the artifact for each emitted turn instead of appending.
+Default: false.
+.TP
+.B TAI_SPEAKER_USER
+Recorded user speaker label.
+Default:
+.BR USER .
+.TP
+.B TAI_SPEAKER_AI
+Recorded AI speaker label.
+Default: the nonempty model name reported by the backend, falling back
+to the requested model.
+.TP
+.B TAI_STDERR_COLOR
+Override ANSI color for runtime diagnostics.
+Default: enabled when standard error is a terminal.
+Unlike other booleans, recognized true words are case-sensitive:
+.BR 1 ,
+.BR true ,
+.BR yes ,
+and
+.BR on .
+Early argument/configuration errors and the interactive input prompt
+use terminal detection before this setting is applied.
+.SS Per-channel formatting variables
+For each
+.I CHANNEL
+of
+.BR STDOUT ,
+.BR TRANSCRIPT ,
+or
+.BR ARTIFACT ,
+the following variables are recognized:
+.TP
+.B TAI_CHANNEL_ENABLE
+Enable rendering for the channel.
+.TP
+.B TAI_CHANNEL_HEADER
+Emit a timestamp, speaker, and message-ID header.
+.TP
+.B TAI_CHANNEL_INDENT
+Prefix each body line with the indentation string.
+.TP
+.B TAI_CHANNEL_SEP
+Emit a trailing blank line and
+.B ---
+separator.
+.TP
+.B TAI_CHANNEL_METADATA
+Emit available response metadata inline.
+This does not control standard-error metadata.
+.TP
+.B TAI_CHANNEL_SPEAKER
+Emit the speaker label on a separate line.
+.TP
+.B TAI_CHANNEL_PROMPT
+Emit the message body.
+Despite the name, this controls both user and AI bodies.
+.TP
+.B TAI_CHANNEL_INDENT_STR
+Indentation string.
+Default: one space.
+Used only when indentation is enabled.
+.PP
+Replace
+.B CHANNEL
+with the actual channel name, for example
+.BR TAI_STDOUT_HEADER=1 .
+There are no implemented
+.B TAI_DRY_RUN
+or
+.B TAI_VERBOSE
+settings.
+.SH DEFAULTS
+The rendering defaults are:
+.PP
+.nf
+Setting       STDOUT    TRANSCRIPT    ARTIFACT
+ENABLE        true      true          true
+HEADER        false     true          false
+INDENT        false     true          false
+SEP           false     true          false
+METADATA      false     false         false
+SPEAKER       false     false         false
+PROMPT        true      true          true
+INDENT_STR    one space one space     one space
+.fi
+.PP
+An enabled artifact renderer has no effect until an output file is selected.
+No speaker suppression is enabled by default.
+Transcript and artifact writes append by default.
+Dry-run and verbose modes are disabled by default.
+.SH OUTPUT CONTROL
+Tokens are case-insensitive and surrounding whitespace is ignored.
+Empty comma-separated tokens are ignored.
+Unknown tokens are fatal errors.
+.PP
+A formatting token may end in
+.BR _STDOUT ,
+.BR _TRANSCRIPT ,
+or
+.B _ARTIFACT
+to target one channel.
+.B _FILE
+is a legacy alias for
+.BR _TRANSCRIPT ,
+not for artifact output.
+Without a suffix, a formatting token affects all three channels.
+Standard error is never targeted by these tokens.
+.PP
+Tokens are applied left to right across all
+.B \-o
+options.
+Later tokens override earlier formatting changes.
+.SS Presets
+.TP
+.BR CONTENT_ONLY ", " PROMPT_ONLY
+Enable body rendering and disable header, metadata, standalone speaker,
+indentation, and separator.
+Does not enable a disabled channel.
+.TP
+.B METADATA_ONLY
+Enable metadata rendering and disable header, speaker, body, and separator.
+Does not enable a disabled channel.
+.TP
+.B HEADER_ONLY
+Enable header rendering and disable metadata, speaker, body, and separator.
+Does not enable a disabled channel.
+.TP
+.B FULL
+Enable the channel and all rendering flags.
+.TP
+.BR SILENT ", " DISABLE
+Disable the channel.
+.TP
+.B ENABLE
+Enable the channel without changing other flags.
+.SS Individual flags
+The following operations enable or disable individual flags:
+.PP
+.nf
+Disable                      Enable
+NO_HEADER, NO_HEADER_FLAG    ADD_HEADER, WITH_HEADER
+NO_METADATA                  ADD_METADATA, WITH_METADATA
+NO_PROMPT, NO_CONTENT        ADD_PROMPT, WITH_CONTENT
+NO_INDENT                    ADD_INDENT, WITH_INDENT
+NO_SEP, NO_SEPARATOR         ADD_SEP, WITH_SEP
+NO_SPEAKER                   ADD_SPEAKER, WITH_SPEAKER
+.fi
+.PP
+These operations do not independently enable a disabled channel.
+.SS Speaker suppression
+The following tokens suppress complete turns before rendering:
+.PP
+.nf
+NO_USER_STDOUT       NO_AI_STDOUT
+NO_USER_TRANSCRIPT   NO_AI_TRANSCRIPT
+NO_USER_ARTIFACT     NO_AI_ARTIFACT
+.fi
+.PP
+.B NO_USER_FILE
+and
+.B NO_AI_FILE
+are aliases for transcript suppression.
+There are no unsuffixed speaker-suppression tokens or inverse tokens
+to restore suppressed speakers.
+Suppression does not prevent the request from being made.
+.SH OUTPUT FORMAT
+When enabled, record components appear in this order:
+header, standalone speaker, body, metadata, separator.
+.PP
+Headers have the form:
+.PP
+.nf
+[timestamp, speaker, message_id]
+.fi
+.PP
+Timestamps use local time from
+.BR "date --rfc-3339=seconds" .
+A nonindented body receives a final newline if it lacks one.
+Indented bodies are processed line by line.
+.PP
+Metadata is generated only when the parsed response contains a usage block.
+It is emitted to standard error regardless of inline metadata settings:
+.PP
+.nf
+<!--{"model":"...","id":"...","usage":{"total":0,"prompt":0,"completion":0}}-->
+.fi
+.PP
+Missing token counts become zero; missing model and ID fields become
+empty strings.
+Dry-run responses have no metadata.
+.SS Message identifiers
+A message ID has the form:
+.PP
+.nf
+<self-hash>-<parent-hash>
+.fi
+.PP
+The self hash is the first eight hexadecimal characters of SHA-256 over
+the text
+.IR timestamp,speaker .
+The parent hash is the first eight characters of the parent message ID,
+or the first eight hexadecimal characters of SHA-256 over
+.B NULL
+for a root.
+.PP
+IDs do not hash message content.
+Turns with the same speaker and timestamp can have the same self hash;
+these identifiers are not guaranteed unique.
+.SH FILES
+.TP
+.B $XDG_CONFIG_HOME/$TAI_APP_NAME/.default.env
+Legacy configuration file, loaded first.
+.TP
+.B $XDG_CONFIG_HOME/$TAI_APP_NAME/config.env
+Primary configuration file.
+.TP
+.B $XDG_DATA_HOME/$TAI_APP_NAME/transcripts/default/YYYY-MM-DD.md
+Default daily transcript.
+Both user and AI records are appended unless suppressed.
+.PP
+With no XDG or application-name overrides, these paths are:
+.PP
+.nf
+~/.config/terminal-ai/.default.env
+~/.config/terminal-ai/config.env
+~/.local/share/terminal-ai/transcripts/default/YYYY-MM-DD.md
+.fi
+.PP
+The default transcript directory is created during normal argument
+processing, even when transcripts are disabled or another directory
+is selected.
+A custom transcript directory must already exist.
+Artifact parent directories and nested transcript filename directories
+are not created.
+.SH EXAMPLES
+Send a prompt with response-only standard output:
+.PP
+.nf
+terminal-ai -o NO_USER_STDOUT "Explain Unix pipes."
+.fi
+.PP
+Use piped text as the prompt:
+.PP
+.nf
+printf '%s\\n' 'Summarize the purpose of POSIX.' |
+    terminal-ai -o NO_USER_STDOUT
+.fi
+.PP
+Attach multiple source files:
+.PP
+.nf
+terminal-ai -o NO_USER_STDOUT \\
+    -i Cargo.toml -i src/main.rs \\
+    "Review this program for correctness."
+.fi
+.PP
+Write a response-only artifact, replacing its previous contents:
+.PP
+.nf
+terminal-ai -o NO_USER_STDOUT,NO_USER_ARTIFACT \\
+    -O answer.md --overwrite-output-file \\
+    "Write a short Markdown guide to shell quoting."
+.fi
+.PP
+Write only an artifact, without standard-output or transcript content:
+.PP
+.nf
+terminal-ai --no-transcript \\
+    -o SILENT_STDOUT,NO_USER_ARTIFACT \\
+    -O answer.md --overwrite-output-file \\
+    "Explain file descriptors."
+.fi
+.PP
+Use a local compatible backend:
+.PP
+.nf
+terminal-ai -b http://localhost:8000 -m local-model \\
+    -o NO_USER_STDOUT "Hello."
+.fi
+.PP
+Test formatting without an API request or transcript writes:
+.PP
+.nf
+terminal-ai --dry-run --no-transcript \\
+    -o NO_USER_STDOUT "Test prompt"
+.fi
+.PP
+Keep a fully decorated transcript while piping only response content:
+.PP
+.nf
+terminal-ai -o NO_USER_STDOUT,FULL_TRANSCRIPT \\
+    "List five useful shell commands." | head -n 5
+.fi
+.PP
+Disable diagnostic color and capture diagnostics separately:
+.PP
+.nf
+TAI_STDERR_COLOR=0 terminal-ai -o NO_USER_STDOUT \\
+    "Explain redirection." >answer.md 2>diagnostics.log
+.fi
+.PP
+Pass prompt text that begins with an option-like word:
+.PP
+.nf
+terminal-ai -o NO_USER_STDOUT -- "--help is the text to explain"
+.fi
+.PP
+Example configuration:
+.PP
+.nf
+TAI_MODEL=gpt-5.4
+TAI_BASE_URL=https://api.openai.com
+TAI_STDERR_COLOR=0
+TAI_TRANSCRIPT_METADATA=1
+TAI_ARTIFACT_INDENT=0
+.fi
+.SH EXIT STATUS
+.TP
+.B 0
+Normal completion, help, version output, or a handled broken pipe.
+A zero status does not guarantee a successful API request.
+.TP
+.B 1
+Explicitly handled failures, including invalid options or output-control
+tokens, missing required values, missing input files, invalid transcript
+directories, missing stdin prompts, and file-write failures.
+.TP
+.B Other nonzero status
+Unhandled failures may cause a Rust panic, normally exiting with status
+101.
+Examples include missing subprocess executables or failure to create
+the default transcript directory.
+.SH DEPENDENCIES
+The following executables must be available through
+.BR PATH :
+.TP
+.B curl
+HTTP transport for nondry-run requests.
+.TP
+.B sha256sum
+Message-ID derivation, including in dry-run mode.
+.TP
+.B date
+Date and timestamp generation.
+The implementation requires support for
+.B \-\-rfc-3339=date
+and
+.BR \-\-rfc-3339=seconds ,
+as provided by GNU date.
+.PP
+The program invokes
+.B date
+before processing help and version options.
+A compatible date implementation is therefore required even for these
+operations.
+.SH SECURITY
+Prompts and attachments are sent to the configured backend.
+By default, both are also retained in the local transcript, and in any
+configured append-mode artifact.
+Use
+.B \-\-no-transcript
+and appropriate speaker-suppression options when retention is unwanted.
+.PP
+The API key and complete request body are passed to
+.B curl
+as command-line arguments.
+They may be visible through process inspection to users permitted by
+the operating system.
+Configuration files, transcripts, and artifacts receive no special
+permission hardening; normal filesystem permissions and the process
+umask apply.
+.PP
+Verbose diagnostics include the raw response body.
+Parse-failure diagnostics also include the raw body even without
+.BR \-\-verbose .
+Standard error must therefore not be assumed to exclude conversation
+content.
+.PP
+The program sends any configured bearer token to the selected base URL.
+Use trusted endpoints and HTTPS when transmitting sensitive data.
+.SH LIMITATIONS
+The implementation does not check curl's exit status or HTTP status.
+Curl's captured standard error is not displayed.
+Malformed or incompatible response JSON produces a diagnostic and an
+empty AI body rather than a fatal error.
+An empty choices array likewise produces a warning and an empty body.
+.PP
+There are no application-configured retries, request timeout, streaming,
+conversation replay, configurable system prompt, or generation-parameter
+options.
+Response content must be a JSON string in
+.BR choices[].message.content .
+.PP
+Output destinations are not transactional.
+Records are written in standard-output, transcript, then artifact order.
+A fatal write error or a handled standard-output broken pipe can prevent
+later destinations from receiving the record.
+Artifact overwrite mode truncates separately for each emitted turn.
+.PP
+Request JSON escaping is limited to backslash, quote, newline, carriage
+return, and tab.
+Other control characters can produce invalid request JSON.
+Inline metadata strings are interpolated without JSON escaping and
+should not be treated as reliably machine-parseable JSON for arbitrary
+backend values.
+.SH SEE ALSO
+.BR curl (1),
+.BR date (1),
+.BR sha256sum (1),
+.BR man (1)
